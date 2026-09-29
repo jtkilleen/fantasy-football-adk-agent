@@ -1,0 +1,57 @@
+# Python / uv
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+.uv-cache/
+dist/
+build/
+*.egg-info/
+
+# Testing & Tooling
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.adk/
+
+# Local Databases & Caches
+*.db
+*.sqlite
+*.sqlite3
+.cache/
+
+# Secrets & Local Environment (NEVER COMMIT)
+.env
+.env.*
+!.env.example
+*credentials*.json
+*service-account*.json
+*.pem
+*.key
+
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+!terraform.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
