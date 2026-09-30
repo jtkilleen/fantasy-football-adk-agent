@@ -17,6 +17,8 @@ provider "google" {
 locals {
   required_apis = toset([
     "aiplatform.googleapis.com",
+    "cloudbuild.googleapis.com",
+    "cloudresourcemanager.googleapis.com",
     "secretmanager.googleapis.com",
     "dlp.googleapis.com",
     "logging.googleapis.com",

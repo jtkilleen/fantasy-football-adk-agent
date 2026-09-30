@@ -20,7 +20,7 @@ output "artifact_registry_repository_id" {
 
 output "adk_deploy_agent_engine_command" {
   description = "Ready-to-run ADK CLI command to deploy the Fantasy Football Personal Agent to Vertex AI Agent Engine."
-  value       = "uv run adk deploy agent_engine --project=${var.project_id} --region=${var.region} --staging_bucket=${google_storage_bucket.agent_engine_staging.url} --display_name=\"Fantasy Football Personal Agent\" fantasy_agent"
+  value       = "uv run adk deploy agent_engine --project=${var.project_id} --region=${var.region} --display_name=\"Fantasy Football Personal Agent\" --otel_to_cloud fantasy_agent"
 }
 
 output "adk_deploy_cloud_run_command" {
