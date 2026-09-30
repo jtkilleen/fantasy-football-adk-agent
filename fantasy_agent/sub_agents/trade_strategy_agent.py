@@ -12,6 +12,7 @@ from fantasy_agent.callbacks import (
     enforce_hitl_before_tool_callback,
     enforce_input_and_domain_guardrails,
     enforce_output_self_eval_guardrail,
+    trace_and_log_after_tool,
 )
 from fantasy_agent.config import select_model_for_task
 from fantasy_agent.prompts import TRADE_STRATEGY_CONSTITUTION
@@ -45,4 +46,5 @@ def build_trade_strategy_agent() -> LlmAgent:
         before_model_callback=enforce_input_and_domain_guardrails,
         after_model_callback=enforce_output_self_eval_guardrail,
         before_tool_callback=enforce_hitl_before_tool_callback,
+        after_tool_callback=trace_and_log_after_tool,
     )

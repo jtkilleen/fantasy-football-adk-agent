@@ -136,9 +136,12 @@ class PersistentFantasyMemoryStore:
         fact_key: str,
         fact_value: Any,
     ) -> None:
-        """Asynchronously persist a user preference or team context fact to SQLite."""
+        """Asynchronously persist a PII-scrubbed user preference or team fact to SQLite."""
+        from fantasy_agent.observability.pii_redactor import get_pii_redactor
+
         await self._ensure_initialized()
-        payload = json.dumps(fact_value, ensure_ascii=False)
+        sanitized_value = get_pii_redactor().redact_value(fact_value)
+        payload = json.dumps(sanitized_value, ensure_ascii=False)
         async with aiosqlite.connect(str(self.db_path)) as db:
             await db.execute(
                 """
@@ -175,8 +178,11 @@ class PersistentFantasyMemoryStore:
         summary_text: str,
         turn_count: int,
     ) -> None:
-        """Asynchronously store a consolidated session summary without blocking UI turns."""
+        """Asynchronously store a PII-scrubbed consolidated session summary without blocking UI turns."""
+        from fantasy_agent.observability.pii_redactor import get_pii_redactor
+
         await self._ensure_initialized()
+        clean_summary = get_pii_redactor().redact_string(summary_text)
         async with aiosqlite.connect(str(self.db_path)) as db:
             await db.execute(
                 """
@@ -187,7 +193,7 @@ class PersistentFantasyMemoryStore:
                     turn_count = excluded.turn_count,
                     updated_at = excluded.updated_at
                 """,
-                (session_id, user_id, team_id, summary_text, turn_count, time.time()),
+                (session_id, user_id, team_id, clean_summary, turn_count, time.time()),
             )
             await db.commit()
 

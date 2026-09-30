@@ -1,4 +1,4 @@
-"""ADK lifecycle callbacks for guardrails and Human-in-the-Loop (HITL) enforcement."""
+"""ADK lifecycle callbacks for guardrails, HITL enforcement, and OpenTelemetry tracing."""
 
 from fantasy_agent.callbacks.guardrails import (
     enforce_input_and_domain_guardrails,
@@ -8,6 +8,7 @@ from fantasy_agent.callbacks.guardrails import (
 from fantasy_agent.callbacks.hitl import (
     HIGH_STAKES_TOOL_NAMES,
     enforce_hitl_before_tool_callback,
+    trace_and_log_after_tool,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "enforce_input_and_domain_guardrails",
     "enforce_output_self_eval_guardrail",
     "scrub_text_pii",
+    "trace_and_log_after_tool",
 ]

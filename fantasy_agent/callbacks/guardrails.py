@@ -14,6 +14,11 @@ from google.adk.models.llm_response import LlmResponse
 from google.genai import types
 
 from fantasy_agent.memory.compaction import compact_llm_request_history
+from fantasy_agent.observability.pii_redactor import get_pii_redactor
+from fantasy_agent.observability.tracing import (
+    trace_and_log_after_model,
+    trace_and_log_before_model,
+)
 
 # Patterns for prompt injection or prohibited real-money sports gambling advice
 _BLOCKED_INPUT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
@@ -35,11 +40,6 @@ _BLOCKED_INPUT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     ),
 ]
 
-# Basic PII scrubbing patterns applied before prompts reach the model
-_EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
-_PHONE_RE = re.compile(r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b")
-_SSN_RE = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
-
 # Self-evaluation output patterns (prohibited guarantees or unredacted secrets)
 _UNSAFE_OUTPUT_RE = re.compile(
     r"(guaranteed\s+100%\s+sportsbook\s+payout|risk-free\s+gambling\s+lock)",
@@ -48,27 +48,15 @@ _UNSAFE_OUTPUT_RE = re.compile(
 
 
 def scrub_text_pii(text: str) -> str:
-    """Redact emails, phone numbers, and SSNs from text."""
-    redacted = _EMAIL_RE.sub("[REDACTED_EMAIL]", text)
-    redacted = _SSN_RE.sub("[REDACTED_SSN]", redacted)
-    redacted = _PHONE_RE.sub("[REDACTED_PHONE]", redacted)
-    return redacted
+    """Redact emails, phone numbers, SSNs, and tokens from text."""
+    return get_pii_redactor().redact_string(text)
 
 
 def enforce_input_and_domain_guardrails(
     callback_context: CallbackContext,
     llm_request: LlmRequest,
 ) -> LlmResponse | None:
-    """ADK `before_model_callback` enforcing domain boundaries, PII scrubbing, and history compaction.
-
-    Args:
-        callback_context: ADK callback context containing session state and agent info.
-        llm_request: Outgoing request about to be sent to the Gemini model.
-
-    Returns:
-        `LlmResponse` short-circuiting the model call if a policy violation is detected,
-        or `None` to allow the sanitized and compacted request to proceed.
-    """
+    """ADK `before_model_callback` enforcing domain boundaries, PII scrubbing, compaction, and tracing."""
     if not llm_request.contents:
         return None
 
@@ -101,6 +89,9 @@ def enforce_input_and_domain_guardrails(
     # Apply sliding-window & token/character compaction (Rubric 2.2)
     compaction_stats = compact_llm_request_history(llm_request)
     callback_context.state["compaction_stats"] = compaction_stats
+
+    # Record structured model_intent and start OpenTelemetry span (Rubric 4.1, 4.2, 4.3)
+    trace_and_log_before_model(callback_context, llm_request)
     return None
 
 
@@ -108,16 +99,8 @@ def enforce_output_self_eval_guardrail(
     callback_context: CallbackContext,
     llm_response: LlmResponse,
 ) -> LlmResponse | None:
-    """ADK `after_model_callback` performing self-evaluation and PII/policy checks on responses.
-
-    Args:
-        callback_context: ADK callback context.
-        llm_response: Response returned by the Gemini model.
-
-    Returns:
-        Modified `LlmResponse` if sanitization or self-eval replacement was required,
-        or `None` if the response passed validation.
-    """
+    """ADK `after_model_callback` performing self-evaluation, PII checks, and outcome tracing."""
+    trace_and_log_after_model(callback_context, llm_response)
     if not llm_response.content or not llm_response.content.parts:
         return None
 

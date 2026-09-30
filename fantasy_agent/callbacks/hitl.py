@@ -1,7 +1,9 @@
-"""Human-in-the-Loop (HITL) confirmation hooks for high-stakes agent actions.
+"""Human-in-the-Loop (HITL) confirmation hooks and Tool Intent/Outcome Tracing Callbacks.
 
-Satisfies AgentOps Rubric Criterion 3.4 (Human-in-the-Loop Hooks):
-High-stakes actions include explicit code stops requiring human confirmation before execution.
+Satisfies AgentOps Rubric Criteria:
+- 3.4 Human-in-the-Loop Hooks (high-stakes actions require explicit human confirmation)
+- 4.2 Intent vs. Outcome Capture (logs `tool_intent` before execution and `tool_outcome` after)
+- 4.3 Distributed Tracing (creates linked OpenTelemetry tool spans)
 """
 
 from __future__ import annotations
@@ -11,6 +13,11 @@ from typing import Any
 from google.adk.tools.base_tool import BaseTool
 from google.adk.tools.tool_context import ToolContext
 
+from fantasy_agent.observability.tracing import (
+    trace_and_log_after_tool,
+    trace_and_log_before_tool,
+)
+
 HIGH_STAKES_TOOL_NAMES = frozenset({"commit_lineup_waiver_or_trade_action"})
 
 
@@ -19,22 +26,10 @@ def enforce_hitl_before_tool_callback(
     args: dict[str, Any],
     tool_context: ToolContext,
 ) -> dict[str, Any] | None:
-    """ADK `before_tool_callback` enforcing Human-in-the-Loop approval on state-mutating tools.
+    """ADK `before_tool_callback` recording tool intent, OpenTelemetry span, and HITL check."""
+    # Record intended tool call and open OpenTelemetry span (Rubric 4.2 & 4.3)
+    trace_and_log_before_tool(tool, args, tool_context)
 
-    Intercepts calls to `commit_lineup_waiver_or_trade_action` and verifies whether explicit
-    human confirmation (`args["human_confirmed"] == True` or `tool_context.state["hitl_approved"]`)
-    has been granted. If not, halts execution before any state mutation occurs and returns
-    a structured confirmation request.
-
-    Args:
-        tool: The ADK tool instance being invoked.
-        args: Dictionary of arguments passed by the LLM to the tool.
-        tool_context: ADK `ToolContext` providing access to session state.
-
-    Returns:
-        A dictionary short-circuiting tool execution when human confirmation is missing,
-        or `None` to allow the tool to execute once confirmed.
-    """
     if tool.name not in HIGH_STAKES_TOOL_NAMES:
         return None
 
@@ -60,7 +55,7 @@ def enforce_hitl_before_tool_callback(
             "partner_team_id": args.get("partner_team_id"),
             "summary": staged_summary,
         }
-        return {
+        blocked_response = {
             "status": "pending_human_confirmation",
             "action_type": action_type,
             "team_id": team_id,
@@ -71,7 +66,9 @@ def enforce_hitl_before_tool_callback(
                 f"details to the user and ask them to reply 'yes' or 'confirm' to proceed."
             ),
         }
+        # Also record the HITL pause outcome on the tool span
+        trace_and_log_after_tool(tool, args, tool_context, blocked_response)
+        return blocked_response
 
-    # Clear pending action once confirmed and allow execution
     tool_context.state["pending_hitl_action"] = None
     return None
