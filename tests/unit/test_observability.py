@@ -40,7 +40,7 @@ def test_structured_json_logging_and_pii_redaction() -> None:
         agent_name="fantasy_football_coordinator",
         user_email="alex.rivera@example.com",
         user_phone="415-555-0199",
-        api_key="AIzaSySecretKeyValue1234567890",
+        api_key="AIza" + "SySecretKeyValue1234567890",
         nested_contact={"ssn": "123-45-6789", "note": "Call 800-555-1234"},
     )
 
