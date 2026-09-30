@@ -1,5 +1,8 @@
 google-cloud-aiplatform[adk,agent_engines]>=1.148.1
-google-adk[a2a]==2.10.0
+google-adk[a2a,otel-gcp]==2.10.0
+opentelemetry-instrumentation-google-genai>=0.7b1,<1
+opentelemetry-instrumentation-grpc>=0.43b0,<1
+opentelemetry-instrumentation-httpx>=0.54b0,<1
 google-cloud-secret-manager>=2.20.0
 google-cloud-logging>=3.10.0
 pydantic>=2.7.0

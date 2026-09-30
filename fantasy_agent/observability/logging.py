@@ -63,8 +63,13 @@ class DualJSONLogSink:
         except OSError:
             pass
 
-        if os.environ.get("FANTASY_LOG_TO_STDERR", "0").upper() in ("1", "TRUE", "YES"):
+        if os.environ.get("FANTASY_LOG_TO_STDERR", "0").upper() in (
+            "1",
+            "TRUE",
+            "YES",
+        ) or os.environ.get("GOOGLE_GENAI_USE_ENTERPRISE") == "1":
             sys.stderr.write(message + "\n")
+            sys.stderr.flush()
 
     info = msg
     warning = msg
