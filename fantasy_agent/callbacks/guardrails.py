@@ -38,6 +38,13 @@ _BLOCKED_INPUT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         ),
         "PROHIBITED_GAMBLING_REQUEST",
     ),
+    (
+        re.compile(
+            r"(trade\s+stocks|irs\s+tax\s+return|medical\s+diagnosis)",
+            re.IGNORECASE,
+        ),
+        "OUT_OF_DOMAIN_REQUEST",
+    ),
 ]
 
 # Self-evaluation output patterns (prohibited guarantees or unredacted secrets)
