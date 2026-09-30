@@ -1,5 +1,10 @@
 """Fantasy Football Personal Agent package."""
 
-from fantasy_agent.agent import root_agent
+from fantasy_agent.agent import app, build_fantasy_app, build_root_agent, root_agent
 
-__all__ = ["root_agent"]
+__all__ = [
+    "app",
+    "build_fantasy_app",
+    "build_root_agent",
+    "root_agent",
+]

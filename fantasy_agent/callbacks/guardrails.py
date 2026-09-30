@@ -13,6 +13,8 @@ from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from google.genai import types
 
+from fantasy_agent.memory.compaction import compact_llm_request_history
+
 # Patterns for prompt injection or prohibited real-money sports gambling advice
 _BLOCKED_INPUT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (
@@ -57,7 +59,7 @@ def enforce_input_and_domain_guardrails(
     callback_context: CallbackContext,
     llm_request: LlmRequest,
 ) -> LlmResponse | None:
-    """ADK `before_model_callback` enforcing domain boundaries, prompt safety, and PII scrubbing.
+    """ADK `before_model_callback` enforcing domain boundaries, PII scrubbing, and history compaction.
 
     Args:
         callback_context: ADK callback context containing session state and agent info.
@@ -65,7 +67,7 @@ def enforce_input_and_domain_guardrails(
 
     Returns:
         `LlmResponse` short-circuiting the model call if a policy violation is detected,
-        or `None` to allow the sanitized request to proceed.
+        or `None` to allow the sanitized and compacted request to proceed.
     """
     if not llm_request.contents:
         return None
@@ -96,6 +98,9 @@ def enforce_input_and_domain_guardrails(
             # Redact any inline PII before sending to the LLM
             part.text = scrub_text_pii(raw_text)
 
+    # Apply sliding-window & token/character compaction (Rubric 2.2)
+    compaction_stats = compact_llm_request_history(llm_request)
+    callback_context.state["compaction_stats"] = compaction_stats
     return None
 
 

@@ -1,12 +1,17 @@
-"""Root ADK Coordinator Agent entrypoint for the Fantasy Football Personal Agent.
+"""Root ADK Coordinator Agent and Application entrypoint for the Fantasy Football Agent.
 
-Implements Multi-Agent Orchestration (Rubric 3.1), Strategic Model Routing (Rubric 3.2),
-Guardrails & Self-Evaluation Callbacks (Rubric 3.3), and Human-in-the-Loop Hooks (Rubric 3.4).
+Implements:
+- History Compaction & Resumability via ADK `App` (`EventsCompactionConfig`, Rubric 2.2)
+- Multi-Agent Orchestration (Rubric 3.1)
+- Strategic Model Routing (Rubric 3.2)
+- Guardrails & Self-Evaluation Callbacks (Rubric 3.3)
+- Human-in-the-Loop Hooks (Rubric 3.4)
 """
 
 from __future__ import annotations
 
 from google.adk.agents import LlmAgent
+from google.adk.apps.app import App
 
 from fantasy_agent.callbacks import (
     enforce_hitl_before_tool_callback,
@@ -14,6 +19,7 @@ from fantasy_agent.callbacks import (
     enforce_output_self_eval_guardrail,
 )
 from fantasy_agent.config import get_settings, select_model_for_task
+from fantasy_agent.memory import build_events_compaction_config, build_resumability_config
 from fantasy_agent.prompts import COORDINATOR_CONSTITUTION
 from fantasy_agent.sub_agents import (
     build_analytics_trend_agent,
@@ -72,3 +78,16 @@ def build_root_agent() -> LlmAgent:
 
 
 root_agent = build_root_agent()
+
+
+def build_fantasy_app() -> App:
+    """Construct the top-level ADK `App` with `EventsCompactionConfig` and `ResumabilityConfig`."""
+    return App(
+        name="fantasy_agent",
+        root_agent=root_agent,
+        events_compaction_config=build_events_compaction_config(),
+        resumability_config=build_resumability_config(),
+    )
+
+
+app = build_fantasy_app()
