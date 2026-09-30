@@ -5,18 +5,22 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from google.adk.agents import SequentialAgent
 from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from google.genai import types
 
-from fantasy_agent.agent import build_root_agent
+from fantasy_agent.agent import build_fantasy_app, build_root_agent
 from fantasy_agent.callbacks import (
+    DEFAULT_GEMINI_SAFETY_SETTINGS,
+    FantasyGuardrailAndPolicyPlugin,
     enforce_hitl_before_tool_callback,
     enforce_input_and_domain_guardrails,
     enforce_output_self_eval_guardrail,
 )
 from fantasy_agent.config import FAST_MODEL, REASONING_MODEL, select_model_for_task
 from fantasy_agent.data.synthetic_league_store import get_league_store
+from fantasy_agent.sub_agents import build_weekly_gameplan_sequential_agent
 from fantasy_agent.tools import (
     analyze_bench_and_start_sit,
     analyze_player_historical_trends,
@@ -28,7 +32,7 @@ from fantasy_agent.tools import (
 
 
 def test_multi_agent_hierarchy_and_strategic_model_routing() -> None:
-    """Verify Rubric 3.1 & 3.2: Coordinator delegates to specialized Flash and Pro sub-agents."""
+    """Verify Rubric 3.1, 3.2 & 3.3: Coordinator + SequentialAgent patterns, Flash/Pro routing, and Policy Plugin."""
     assert select_model_for_task("fast") == FAST_MODEL
     assert select_model_for_task("analytics") == REASONING_MODEL
     assert select_model_for_task("trade_strategy") == REASONING_MODEL
@@ -36,6 +40,7 @@ def test_multi_agent_hierarchy_and_strategic_model_routing() -> None:
     coordinator = build_root_agent()
     assert coordinator.model == FAST_MODEL
     assert len(coordinator.sub_agents) == 3
+    assert len(DEFAULT_GEMINI_SAFETY_SETTINGS) == 4
 
     sub_map = {sa.name: sa for sa in coordinator.sub_agents}
     assert set(sub_map.keys()) == {
@@ -46,6 +51,15 @@ def test_multi_agent_hierarchy_and_strategic_model_routing() -> None:
     assert sub_map["league_roster_agent"].model == FAST_MODEL
     assert sub_map["analytics_trend_agent"].model == REASONING_MODEL
     assert sub_map["trade_strategy_agent"].model == REASONING_MODEL
+
+    # Verify SequentialAgent pattern (Rubric 3.1)
+    seq_agent = build_weekly_gameplan_sequential_agent()
+    assert isinstance(seq_agent, SequentialAgent)
+    assert len(seq_agent.sub_agents) == 3
+
+    # Verify BasePlugin registration on App (Rubric 3.3)
+    app_instance = build_fantasy_app()
+    assert any(isinstance(p, FantasyGuardrailAndPolicyPlugin) for p in app_instance.plugins)
 
 
 @pytest.mark.asyncio

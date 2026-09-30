@@ -12,8 +12,11 @@ from __future__ import annotations
 
 from google.adk.agents import LlmAgent
 from google.adk.apps.app import App
+from google.genai import types
 
 from fantasy_agent.callbacks import (
+    DEFAULT_GEMINI_SAFETY_SETTINGS,
+    FantasyGuardrailAndPolicyPlugin,
     enforce_hitl_before_tool_callback,
     enforce_input_and_domain_guardrails,
     enforce_output_self_eval_guardrail,
@@ -26,6 +29,7 @@ from fantasy_agent.sub_agents import (
     build_analytics_trend_agent,
     build_league_roster_agent,
     build_trade_strategy_agent,
+    build_weekly_gameplan_sequential_agent,
 )
 from fantasy_agent.tools import (
     analyze_bench_and_start_sit,
@@ -72,6 +76,9 @@ def build_root_agent() -> LlmAgent:
             evaluate_league_trade_proposal,
             commit_lineup_waiver_or_trade_action,
         ],
+        generate_content_config=types.GenerateContentConfig(
+            safety_settings=DEFAULT_GEMINI_SAFETY_SETTINGS
+        ),
         before_model_callback=enforce_input_and_domain_guardrails,
         after_model_callback=enforce_output_self_eval_guardrail,
         before_tool_callback=enforce_hitl_before_tool_callback,
@@ -80,13 +87,15 @@ def build_root_agent() -> LlmAgent:
 
 
 root_agent = build_root_agent()
+weekly_gameplan_sequential_agent = build_weekly_gameplan_sequential_agent()
 
 
 def build_fantasy_app() -> App:
-    """Construct the top-level ADK `App` with `EventsCompactionConfig` and `ResumabilityConfig`."""
+    """Construct the top-level ADK `App` with `FantasyGuardrailAndPolicyPlugin`, `EventsCompactionConfig`, and `ResumabilityConfig`."""
     return App(
         name="fantasy_agent",
         root_agent=root_agent,
+        plugins=[FantasyGuardrailAndPolicyPlugin()],
         events_compaction_config=build_events_compaction_config(),
         resumability_config=build_resumability_config(),
     )

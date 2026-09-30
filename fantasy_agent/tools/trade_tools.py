@@ -20,6 +20,7 @@ from fantasy_agent.tools.schemas import (
     CommitActionOutput,
     PlayerSummarySchema,
     ToolErrorOutput,
+    TradeDiscoveryInput,
     TradeDiscoveryOutput,
     TradeEvaluationInput,
     TradeEvaluationOutput,
@@ -44,13 +45,22 @@ async def discover_mutually_beneficial_trades(
         with identified positional surpluses, weaknesses, and concrete win-win trade
         proposals across the league, or a `ToolErrorOutput` dictionary.
     """
+    try:
+        validated_in = TradeDiscoveryInput(team_id=team_id)
+    except ValidationError as exc:
+        return ToolErrorOutput(
+            error_type="INVALID_TRADE_DISCOVERY_INPUT",
+            message=f"Trade discovery input validation failed: {exc.errors()[0]['msg']}",
+            recovery_instruction="Pass a non-empty `team_id` such as 'team_alpha'.",
+        ).model_dump()
+
     store = get_league_store()
-    user_team = store.resolve_team(team_id)
+    user_team = store.resolve_team(validated_in.team_id)
     if user_team is None:
         valid_ids = ", ".join(store.teams.keys())
         return ToolErrorOutput(
             error_type="TEAM_NOT_FOUND",
-            message=f"Could not find team '{team_id}'.",
+            message=f"Could not find team '{validated_in.team_id}'.",
             recovery_instruction=(
                 f"Call `discover_mutually_beneficial_trades` with a valid team ID: {valid_ids}."
             ),

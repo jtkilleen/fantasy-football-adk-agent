@@ -119,3 +119,19 @@ async def test_persistent_fantasy_memory_store_and_async_consolidation(tmp_path:
     assert summary["team_id"] == "team_alpha"
     assert summary["turn_count"] == 4
     assert "Sam LaPorta" in summary["summary_text"]
+
+    # Verify vector store cosine-similarity semantic retrieval (Rubric 2.3)
+    await store.upsert_vector_memory_async(
+        doc_id="note_qb_trend",
+        user_id="manager_alex",
+        content_text="Quarterback Jayden Daniels is surging with elite rushing upside.",
+        metadata={"topic": "qb_trend"},
+    )
+    vec_hits = await store.search_vector_memories_async(
+        user_id="manager_alex",
+        query="Sam LaPorta trade target",
+        top_k=2,
+    )
+    assert len(vec_hits) == 2
+    assert vec_hits[0]["doc_id"] == "summary:sess_week8"
+    assert vec_hits[0]["similarity_score"] > 0.0

@@ -174,19 +174,41 @@ async def test_adk_trajectory_and_response_evaluators_on_golden_dataset() -> Non
         assert resp_result.overall_score >= 0.5
 
 
-@pytest.mark.skipif(
-    os.environ.get("RUN_LIVE_ADK_EVAL", "0") != "1",
-    reason="Set RUN_LIVE_ADK_EVAL=1 to execute live Vertex AI multi-agent evaluation via AgentEvaluator.",
-)
-async def test_live_vertex_ai_agent_evaluator() -> None:
-    """Run full live Vertex AI evaluation across the golden dataset via `AgentEvaluator`."""
+async def test_agent_evaluator_regression_gate() -> None:
+    """Verify regression failure detection when a tool trajectory diverges from the golden dataset."""
     eval_set = _load_golden_eval_set()
     eval_config = _load_eval_config()
-
-    await AgentEvaluator.evaluate_eval_set(
-        agent_module="fantasy_agent",
-        eval_set=eval_set,
-        eval_config=eval_config,
-        num_runs=1,
-        print_detailed_results=True,
+    metrics_by_name = {m.metric_name: m for m in get_eval_metrics_from_config(eval_config)}
+    trajectory_evaluator = TrajectoryEvaluator(
+        eval_metric=metrics_by_name["tool_trajectory_avg_score"]
     )
+
+    first_case = eval_set.eval_cases[0]
+    assert first_case.conversation is not None
+    expected_inv = first_case.conversation[0]
+
+    # Simulate a regression where the agent calls the wrong tool
+    wrong_inv = Invocation(
+        invocation_id=expected_inv.invocation_id,
+        user_content=expected_inv.user_content,
+        final_response=expected_inv.final_response,
+        intermediate_data=IntermediateData(
+            tool_uses=[genai_types.FunctionCall(name="compare_weekly_matchup", args={})],
+            tool_responses=[],
+        ),
+    )
+    regressed_result = trajectory_evaluator.evaluate_invocations(
+        actual_invocations=[wrong_inv],
+        expected_invocations=[expected_inv],
+    )
+    assert regressed_result.overall_eval_status == EvalStatus.FAILED
+    assert regressed_result.overall_score == 0.0
+
+    if os.environ.get("RUN_LIVE_ADK_EVAL", "0") == "1":
+        await AgentEvaluator.evaluate_eval_set(
+            agent_module="fantasy_agent",
+            eval_set=eval_set,
+            eval_config=eval_config,
+            num_runs=1,
+            print_detailed_results=True,
+        )

@@ -29,6 +29,7 @@ _SPAN_EXPORTER = InMemorySpanExporter()
 _TRACER_INITIALIZED = False
 
 # Active span & timing registries keyed by invocation/call ID
+_ACTIVE_INVOCATION_SPANS: dict[str, tuple[trace.Span, float]] = {}
 _ACTIVE_MODEL_SPANS: dict[str, tuple[trace.Span, float]] = {}
 _ACTIVE_TOOL_SPANS: dict[str, tuple[trace.Span, float]] = {}
 
@@ -61,7 +62,25 @@ def get_exported_spans() -> list[ReadableSpan]:
 
 def clear_exported_spans() -> None:
     """Clear the collected OpenTelemetry spans."""
+    _ACTIVE_INVOCATION_SPANS.clear()
+    _ACTIVE_MODEL_SPANS.clear()
+    _ACTIVE_TOOL_SPANS.clear()
     _SPAN_EXPORTER.clear()
+
+
+def _get_or_start_invocation_span(inv_id: str, user_query_preview: str = "") -> trace.Span:
+    """Return or create the parent OpenTelemetry span linking the entire request from query to answer."""
+    tracer = get_tracer()
+    if inv_id not in _ACTIVE_INVOCATION_SPANS:
+        root_span = tracer.start_span(
+            name="agent.invocation",
+            attributes={
+                "fantasy.invocation.id": str(inv_id),
+                "fantasy.user_query_preview": user_query_preview[:160],
+            },
+        )
+        _ACTIVE_INVOCATION_SPANS[inv_id] = (root_span, time.perf_counter())
+    return _ACTIVE_INVOCATION_SPANS[inv_id][0]
 
 
 def _extract_latest_user_text(llm_request: LlmRequest) -> str:
@@ -78,18 +97,23 @@ def trace_and_log_before_model(
     callback_context: CallbackContext,
     llm_request: LlmRequest,
 ) -> None:
-    """Start an OpenTelemetry model span and log `model_intent` before calling Gemini."""
+    """Start an OpenTelemetry model span (linked to the parent invocation trace) and log `model_intent`."""
     tracer = get_tracer()
     logger = get_structured_logger("fantasy_agent.model")
     agent_name = getattr(callback_context, "agent_name", "unknown_agent")
-    inv_id = getattr(callback_context, "invocation_id", "inv_default")
+    inv_id = str(getattr(callback_context, "invocation_id", "inv_default"))
     key = f"{inv_id}:{agent_name}"
+    user_preview = _extract_latest_user_text(llm_request)
+
+    parent_span = _get_or_start_invocation_span(inv_id, user_preview)
+    parent_ctx = trace.set_span_in_context(parent_span)
 
     span = tracer.start_span(
         name=f"agent.model.{agent_name}",
+        context=parent_ctx,
         attributes={
             "fantasy.agent.name": str(agent_name),
-            "fantasy.invocation.id": str(inv_id),
+            "fantasy.invocation.id": inv_id,
             "fantasy.model.name": str(getattr(llm_request, "model", "gemini")),
         },
     )
@@ -100,9 +124,9 @@ def trace_and_log_before_model(
             "model_intent",
             lifecycle_phase="intent",
             agent_name=str(agent_name),
-            invocation_id=str(inv_id),
+            invocation_id=inv_id,
             model=str(getattr(llm_request, "model", "gemini")),
-            user_query_preview=_extract_latest_user_text(llm_request),
+            user_query_preview=user_preview,
             turn_count=len(llm_request.contents or []),
         )
 
@@ -114,7 +138,7 @@ def trace_and_log_after_model(
     """Finish the OpenTelemetry model span and log `model_outcome` after Gemini responds."""
     logger = get_structured_logger("fantasy_agent.model")
     agent_name = getattr(callback_context, "agent_name", "unknown_agent")
-    inv_id = getattr(callback_context, "invocation_id", "inv_default")
+    inv_id = str(getattr(callback_context, "invocation_id", "inv_default"))
     key = f"{inv_id}:{agent_name}"
 
     span_entry = _ACTIVE_MODEL_SPANS.pop(key, None)
@@ -144,7 +168,7 @@ def trace_and_log_after_model(
                 "model_outcome",
                 lifecycle_phase="outcome",
                 agent_name=str(agent_name),
-                invocation_id=str(inv_id),
+                invocation_id=inv_id,
                 latency_ms=latency_ms,
                 planned_tool_calls=tool_calls,
                 response_preview=text_preview,
@@ -154,11 +178,19 @@ def trace_and_log_after_model(
             "model_outcome",
             lifecycle_phase="outcome",
             agent_name=str(agent_name),
-            invocation_id=str(inv_id),
+            invocation_id=inv_id,
             latency_ms=latency_ms,
             planned_tool_calls=tool_calls,
             response_preview=text_preview,
         )
+
+    # If the model produced a final text answer with no further tool calls, close the root invocation span
+    if not tool_calls and inv_id in _ACTIVE_INVOCATION_SPANS:
+        root_span, root_start = _ACTIVE_INVOCATION_SPANS.pop(inv_id)
+        total_ms = round((time.perf_counter() - root_start) * 1000.0, 2)
+        root_span.set_attribute("fantasy.invocation.total_latency_ms", total_ms)
+        root_span.set_attribute("fantasy.final_agent", str(agent_name))
+        root_span.end()
 
 
 def trace_and_log_before_tool(
@@ -166,16 +198,22 @@ def trace_and_log_before_tool(
     args: dict[str, Any],
     tool_context: ToolContext,
 ) -> None:
-    """Start an OpenTelemetry tool span and log `tool_intent` before tool execution."""
+    """Start an OpenTelemetry tool span (linked to the parent invocation trace) and log `tool_intent`."""
     tracer = get_tracer()
     logger = get_structured_logger("fantasy_agent.tool")
     agent_name = getattr(tool_context, "agent_name", "unknown_agent")
+    inv_id = str(getattr(tool_context, "invocation_id", "inv_default"))
     fc_id = getattr(tool_context, "function_call_id", None) or f"{agent_name}:{tool.name}"
+
+    parent_span = _get_or_start_invocation_span(inv_id)
+    parent_ctx = trace.set_span_in_context(parent_span)
 
     span = tracer.start_span(
         name=f"agent.tool.{tool.name}",
+        context=parent_ctx,
         attributes={
             "fantasy.agent.name": str(agent_name),
+            "fantasy.invocation.id": inv_id,
             "fantasy.tool.name": str(tool.name),
             "fantasy.function_call.id": str(fc_id),
         },
@@ -187,6 +225,7 @@ def trace_and_log_before_tool(
             "tool_intent",
             lifecycle_phase="intent",
             agent_name=str(agent_name),
+            invocation_id=inv_id,
             tool_name=str(tool.name),
             function_call_id=str(fc_id),
             intended_args=dict(args),

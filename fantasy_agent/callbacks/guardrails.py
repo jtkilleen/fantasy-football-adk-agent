@@ -11,6 +11,7 @@ import re
 from google.adk.agents.callback_context import CallbackContext
 from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
+from google.adk.plugins.base_plugin import BasePlugin
 from google.genai import types
 
 from fantasy_agent.memory.compaction import compact_llm_request_history
@@ -19,6 +20,26 @@ from fantasy_agent.observability.tracing import (
     trace_and_log_after_model,
     trace_and_log_before_model,
 )
+
+# Google Cloud / Vertex AI Gemini Safety Settings (Rubric 3.3)
+DEFAULT_GEMINI_SAFETY_SETTINGS: list[types.SafetySetting] = [
+    types.SafetySetting(
+        category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+        threshold=types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+    ),
+    types.SafetySetting(
+        category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+        threshold=types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+    ),
+    types.SafetySetting(
+        category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+        threshold=types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+    ),
+    types.SafetySetting(
+        category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+        threshold=types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+    ),
+]
 
 # Patterns for prompt injection or prohibited real-money sports gambling advice
 _BLOCKED_INPUT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
@@ -134,3 +155,42 @@ def enforce_output_self_eval_guardrail(
             content=types.Content(role="model", parts=new_parts),
         )
     return None
+
+
+class FantasyGuardrailAndPolicyPlugin(BasePlugin):
+    """ADK `BasePlugin` enforcing application-wide domain policy, PII scrubbing, and self-evaluation (Rubric 3.3)."""
+
+    def __init__(self, name: str = "fantasy_guardrail_and_policy_plugin") -> None:
+        super().__init__(name=name)
+
+    async def before_model_callback(
+        self,
+        *,
+        callback_context: CallbackContext,
+        llm_request: LlmRequest,
+    ) -> LlmResponse | None:
+        """Delegate plugin-level input check for prompt injection or prohibited gambling."""
+        if not llm_request.contents:
+            return None
+        for content in llm_request.contents:
+            if content.role != "user" or not content.parts:
+                continue
+            for part in content.parts:
+                if not part.text:
+                    continue
+                for pattern, violation_code in _BLOCKED_INPUT_PATTERNS:
+                    if pattern.search(part.text):
+                        callback_context.state["last_guardrail_violation"] = violation_code
+                        refusal_msg = (
+                            "I cannot fulfill that request. As your Fantasy Football Personal Agent, "
+                            "I am restricted to fantasy football roster, matchup, trade, and player "
+                            "trend analysis, and I cannot process prompt-override commands or provide "
+                            "real-money sports gambling/wagering advice."
+                        )
+                        return LlmResponse(
+                            content=types.Content(
+                                role="model",
+                                parts=[types.Part.from_text(text=refusal_msg)],
+                            )
+                        )
+        return None

@@ -353,6 +353,18 @@ class TradeSuggestionSchema(BaseModel):
     why_it_works_for_both_teams: str
 
 
+class TradeDiscoveryInput(BaseModel):
+    """Input schema for `discover_mutually_beneficial_trades`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    team_id: str = Field(
+        default="team_alpha",
+        min_length=2,
+        description="Team ID or name of the user's fantasy team (defaults to 'team_alpha').",
+    )
+
+
 class TradeDiscoveryOutput(BaseModel):
     """Output schema for `discover_mutually_beneficial_trades`."""
 

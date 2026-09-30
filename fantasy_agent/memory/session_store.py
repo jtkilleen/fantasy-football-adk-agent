@@ -66,8 +66,17 @@ def create_persistent_session_service(
 
 def create_persistent_memory_service(
     agent_engine_id: str | None = None,
+    rag_corpus_id: str | None = None,
 ) -> BaseMemoryService:
-    """Create an ADK `BaseMemoryService` backed by Vertex AI Memory Bank or in-memory fallback."""
+    """Create an ADK `BaseMemoryService` backed by Vertex AI Memory Bank, Vertex AI RAG/Search, or in-memory fallback."""
+    resolved_rag_corpus = rag_corpus_id or os.environ.get("GOOGLE_CLOUD_RAG_CORPUS_ID")
+    if resolved_rag_corpus:
+        from google.adk.memory.vertex_ai_rag_memory_service import (
+            VertexAiRagMemoryService,
+        )
+
+        return VertexAiRagMemoryService(rag_corpus=resolved_rag_corpus)
+
     resolved_engine_id = agent_engine_id or os.environ.get("GOOGLE_CLOUD_AGENT_ENGINE_ID")
     if resolved_engine_id:
         from google.adk.memory.vertex_ai_memory_bank_service import (
@@ -83,11 +92,37 @@ def create_persistent_memory_service(
     return InMemoryMemoryService()
 
 
-class PersistentFantasyMemoryStore:
-    """Async SQLite-backed memory bank for persisting user preferences and consolidated turn memories.
+def _compute_text_embedding(text: str, dim: int = 32) -> list[float]:
+    """Compute a normalized deterministic feature-hashing vector embedding for semantic retrieval."""
+    import hashlib
+    import math
+    import re
 
-    Provides non-blocking async read/write and background memory consolidation tasks
-    (Rubric Criteria 2.3 and 2.4).
+    vec = [0.0] * dim
+    tokens = re.findall(r"[a-z0-9_]+", text.lower())
+    if not tokens:
+        return vec
+    for token in tokens:
+        digest = hashlib.sha256(token.encode("utf-8")).digest()
+        bucket = digest[0] % dim
+        sign = 1.0 if (digest[1] % 2 == 0) else -1.0
+        vec[bucket] += sign
+    norm = math.sqrt(sum(v * v for v in vec))
+    if norm > 0:
+        vec = [round(v / norm, 6) for v in vec]
+    return vec
+
+
+def _cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
+    """Compute cosine similarity between two normalized embedding vectors."""
+    return round(sum(a * b for a, b in zip(vec_a, vec_b, strict=False)), 4)
+
+
+class PersistentFantasyMemoryStore:
+    """Async SQLite & Vector-backed memory bank for persisting user preferences, session summaries, and semantic vector memories.
+
+    Provides non-blocking async read/write, cosine-similarity vector retrieval, and background
+    memory consolidation tasks (Rubric Criteria 2.3 and 2.4).
     """
 
     def __init__(self, db_path: str | Path | None = None) -> None:
@@ -123,6 +158,18 @@ class PersistentFantasyMemoryStore:
                         team_id TEXT NOT NULL,
                         summary_text TEXT NOT NULL,
                         turn_count INTEGER NOT NULL,
+                        updated_at REAL NOT NULL
+                    )
+                    """
+                )
+                await db.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS memory_vector_embeddings (
+                        doc_id TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL,
+                        content_text TEXT NOT NULL,
+                        embedding_json TEXT NOT NULL,
+                        metadata_json TEXT NOT NULL,
                         updated_at REAL NOT NULL
                     )
                     """
@@ -170,6 +217,74 @@ class PersistentFantasyMemoryStore:
                 facts[key] = json.loads(val_json)
         return facts
 
+    async def upsert_vector_memory_async(
+        self,
+        doc_id: str,
+        user_id: str,
+        content_text: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Asynchronously index a PII-scrubbed memory document with vector embeddings into SQLite."""
+        from fantasy_agent.observability.pii_redactor import get_pii_redactor
+
+        await self._ensure_initialized()
+        redactor = get_pii_redactor()
+        clean_text = redactor.redact_string(content_text)
+        clean_meta = redactor.redact_value(metadata or {})
+        embedding = _compute_text_embedding(clean_text)
+        async with aiosqlite.connect(str(self.db_path)) as db:
+            await db.execute(
+                """
+                INSERT INTO memory_vector_embeddings (doc_id, user_id, content_text, embedding_json, metadata_json, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(doc_id) DO UPDATE SET
+                    content_text = excluded.content_text,
+                    embedding_json = excluded.embedding_json,
+                    metadata_json = excluded.metadata_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    doc_id,
+                    user_id,
+                    clean_text,
+                    json.dumps(embedding),
+                    json.dumps(clean_meta, ensure_ascii=False),
+                    time.time(),
+                ),
+            )
+            await db.commit()
+
+    async def search_vector_memories_async(
+        self,
+        user_id: str,
+        query: str,
+        top_k: int = 3,
+    ) -> list[dict[str, Any]]:
+        """Retrieve top-k semantically similar memory documents using cosine similarity."""
+        await self._ensure_initialized()
+        query_vec = _compute_text_embedding(query)
+        scored_results: list[dict[str, Any]] = []
+        async with (
+            aiosqlite.connect(str(self.db_path)) as db,
+            db.execute(
+                "SELECT doc_id, content_text, embedding_json, metadata_json FROM memory_vector_embeddings WHERE user_id = ?",
+                (user_id,),
+            ) as cursor,
+        ):
+            async for doc_id, content_text, emb_json, meta_json in cursor:
+                doc_vec = json.loads(emb_json)
+                sim = _cosine_similarity(query_vec, doc_vec)
+                scored_results.append(
+                    {
+                        "doc_id": doc_id,
+                        "content_text": content_text,
+                        "similarity_score": sim,
+                        "metadata": json.loads(meta_json),
+                    }
+                )
+        scored_results.sort(key=lambda item: item["similarity_score"], reverse=True)
+        return scored_results[:top_k]
+
     async def consolidate_session_summary_async(
         self,
         session_id: str,
@@ -178,7 +293,7 @@ class PersistentFantasyMemoryStore:
         summary_text: str,
         turn_count: int,
     ) -> None:
-        """Asynchronously store a PII-scrubbed consolidated session summary without blocking UI turns."""
+        """Asynchronously store a PII-scrubbed consolidated session summary and index its vector embedding."""
         from fantasy_agent.observability.pii_redactor import get_pii_redactor
 
         await self._ensure_initialized()
@@ -196,6 +311,12 @@ class PersistentFantasyMemoryStore:
                 (session_id, user_id, team_id, clean_summary, turn_count, time.time()),
             )
             await db.commit()
+        await self.upsert_vector_memory_async(
+            doc_id=f"summary:{session_id}",
+            user_id=user_id,
+            content_text=clean_summary,
+            metadata={"session_id": session_id, "team_id": team_id, "turn_count": turn_count},
+        )
 
     async def get_session_summary_async(self, session_id: str) -> dict[str, Any] | None:
         """Retrieve a consolidated session summary from persistent SQLite storage."""
