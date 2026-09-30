@@ -77,7 +77,9 @@ def test_public_repo_hygiene_no_hardcoded_project_id_or_secrets() -> None:
                 path.is_file()
                 and path.resolve() != this_file
                 and ".adk" not in path.parts
+                and ".terraform" not in path.parts
                 and "__pycache__" not in path.parts
+                and ".tfstate" not in path.name
             ):
                 files_to_scan.append(path)
 
