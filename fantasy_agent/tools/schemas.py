@@ -168,3 +168,244 @@ class WaiverSearchOutput(BaseModel):
     position_filter: str
     available_count: int
     players: list[PlayerSummarySchema]
+
+
+# --- Milestone 3: Analytics, Bench, Insights, Trade & HITL Schemas ---
+
+
+class PlayerTrendInput(BaseModel):
+    """Input schema for `analyze_player_historical_trends`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    player_name_or_id: str = Field(
+        min_length=2,
+        description="Player name or ID to analyze (e.g., 'Jayden Daniels' or 'p_jayden_daniels').",
+    )
+    through_week: int = Field(
+        default=7,
+        ge=3,
+        le=7,
+        description="Number of completed weeks to compare between 2025 and 2024 (3 to 7).",
+    )
+
+
+class PlayerTrendOutput(BaseModel):
+    """Output schema for `analyze_player_historical_trends`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["success"] = "success"
+    player_id: str
+    name: str
+    nfl_team: str
+    position: str
+    through_week: int
+    season_2025_weekly_pts: list[float]
+    season_2024_weekly_pts: list[float]
+    avg_pts_2025: float
+    avg_pts_2024: float
+    yoy_delta_ppg: float
+    yoy_pct_change: float
+    recent_3_week_avg_2025: float
+    trend_direction: Literal["surging", "steady", "declining"]
+    snap_share_pct: float
+    target_or_touch_share_pct: float
+    analytical_summary: str
+
+
+class BenchAnalysisInput(BaseModel):
+    """Input schema for `analyze_bench_and_start_sit`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    team_id: str = Field(
+        default="team_alpha",
+        min_length=2,
+        description="Team ID or name whose bench and starting lineup should be analyzed.",
+    )
+
+
+class LineupSwapRecommendation(BaseModel):
+    """Recommended start/sit swap between a bench player and a current starter."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    bench_player_to_start: str
+    bench_player_position: str
+    bench_player_projection: float
+    starter_to_sit: str
+    starter_position: str
+    starter_projection: float
+    projected_point_gain: float
+    rationale: str
+
+
+class DropCandidateRecommendation(BaseModel):
+    """Recommended bench player to drop and top waiver wire replacement."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    drop_player_name: str
+    drop_player_position: str
+    drop_player_injury_status: str
+    drop_player_projection: float
+    recommended_waiver_pickup: str
+    pickup_position: str
+    pickup_projection: float
+    net_projection_upgrade: float
+    rationale: str
+
+
+class BenchAnalysisOutput(BaseModel):
+    """Output schema for `analyze_bench_and_start_sit`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["success"] = "success"
+    team_id: str
+    team_name: str
+    current_projected_total: float
+    optimized_projected_total: float
+    start_sit_recommendations: list[LineupSwapRecommendation]
+    drop_and_pickup_recommendations: list[DropCandidateRecommendation]
+    bench_players: list[PlayerSummarySchema]
+
+
+class InsightSearchInput(BaseModel):
+    """Input schema for `search_player_and_team_insights`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(
+        min_length=2,
+        description="Search query for player name, NFL team code (e.g., 'WAS', 'LAC'), position, or injury/usage keyword.",
+    )
+
+
+class InsightSearchOutput(BaseModel):
+    """Output schema for `search_player_and_team_insights`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["success"] = "success"
+    query: str
+    match_count: int
+    matching_insights: list[PlayerSummarySchema]
+
+
+class TradeEvaluationInput(BaseModel):
+    """Input schema for `evaluate_league_trade_proposal`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    proposer_team_id: str = Field(
+        default="team_alpha",
+        min_length=2,
+        description="Team ID or name proposing the trade (defaults to 'team_alpha').",
+    )
+    partner_team_id: str = Field(
+        min_length=2,
+        description="Partner team ID or name (e.g., 'team_bravo' or 'team_charlie').",
+    )
+    send_player_names: list[str] = Field(
+        min_length=1,
+        description="List of player names or IDs that `proposer_team_id` would send.",
+    )
+    receive_player_names: list[str] = Field(
+        min_length=1,
+        description="List of player names or IDs that `proposer_team_id` would receive.",
+    )
+
+
+class TradeEvaluationOutput(BaseModel):
+    """Output schema for `evaluate_league_trade_proposal`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["success"] = "success"
+    proposer_team_name: str
+    partner_team_name: str
+    sent_players: list[PlayerSummarySchema]
+    received_players: list[PlayerSummarySchema]
+    proposer_weekly_projection_delta: float
+    partner_weekly_projection_delta: float
+    fairness_verdict: Literal["FAIR_MUTUALLY_BENEFICIAL", "SLIGHTLY_UNBALANCED", "LOPSIDED"]
+    positional_fit_analysis: str
+    recommendation: str
+
+
+class TradeSuggestionSchema(BaseModel):
+    """A mutually beneficial trade suggestion discovered across the league."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    partner_team_id: str
+    partner_team_name: str
+    partner_manager: str
+    send_player: str
+    send_player_position: str
+    send_player_projection: float
+    receive_player: str
+    receive_player_position: str
+    receive_player_projection: float
+    user_starter_upgrade_pts: float
+    why_it_works_for_both_teams: str
+
+
+class TradeDiscoveryOutput(BaseModel):
+    """Output schema for `discover_mutually_beneficial_trades`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["success"] = "success"
+    user_team_name: str
+    identified_team_weakness: str
+    identified_team_surplus: str
+    suggested_trades: list[TradeSuggestionSchema]
+
+
+class CommitActionInput(BaseModel):
+    """Input schema for `commit_lineup_waiver_or_trade_action`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action_type: Literal["WAIVER_ADD_DROP", "SET_STARTER_LINEUP", "SUBMIT_TRADE_PROPOSAL"] = Field(
+        description="Type of high-stakes roster or trade action to execute."
+    )
+    team_id: str = Field(
+        default="team_alpha",
+        min_length=2,
+        description="Team ID performing the action.",
+    )
+    primary_player_name: str = Field(
+        min_length=2,
+        description="Player being added, moved into starting lineup, or acquired in trade.",
+    )
+    secondary_player_name: str = Field(
+        min_length=2,
+        description="Player being dropped, moved to bench, or traded away.",
+    )
+    partner_team_id: str | None = Field(
+        default=None,
+        description="Required when `action_type` is 'SUBMIT_TRADE_PROPOSAL'.",
+    )
+    human_confirmed: bool = Field(
+        default=False,
+        description=(
+            "MUST be False until the user has explicitly confirmed the exact transaction "
+            "in conversation. Only set to True after explicit user approval."
+        ),
+    )
+
+
+class CommitActionOutput(BaseModel):
+    """Output schema for `commit_lineup_waiver_or_trade_action`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["executed", "pending_human_confirmation"]
+    action_type: str
+    team_id: str
+    summary: str
+    requires_confirmation_prompt: str | None = None

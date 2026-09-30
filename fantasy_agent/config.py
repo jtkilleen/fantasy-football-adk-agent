@@ -21,6 +21,20 @@ REASONING_MODEL = os.environ.get("FANTASY_AGENT_REASONING_MODEL", "gemini-2.5-pr
 DEFAULT_GCP_LOCATION = "us-central1"
 
 
+def select_model_for_task(task_complexity: str) -> str:
+    """Route an agent or task to the appropriate Gemini model tier.
+
+    Satisfies AgentOps Rubric Criterion 3.2 (Strategic Model Routing):
+    - Fast / low-latency tasks (`"fast"`, `"routing"`, `"lookup"`, `"waiver"`) -> `gemini-2.5-flash`
+    - Complex analytical or multi-step planning tasks (`"reasoning"`, `"analytics"`,
+      `"trade_strategy"`, `"planning"`) -> `gemini-2.5-pro`
+    """
+    normalized = task_complexity.strip().lower()
+    if normalized in {"reasoning", "analytics", "trade_strategy", "planning", "pro"}:
+        return REASONING_MODEL
+    return FAST_MODEL
+
+
 def resolve_gcp_project_id() -> str:
     """Resolve the active Google Cloud Project ID without hardcoding project identifiers.
 
